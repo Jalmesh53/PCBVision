@@ -1,0 +1,33 @@
+{
+    "template_name": "ESP32Cam",
+    "created_at": "2026-10-04T12:00:43.197590",
+    "reference_images": [
+        "images/reference_01.jpg",
+        "images/reference_02.jpg",
+        "images/reference_03.jpg",
+        "images/reference_04.jpg"
+    ],
+    "reference_image_count": 4,
+    "component_count": 1,
+    "components": [
+        {
+            "class_id": 45,
+            "class_name": "ESP32",
+            "count": 1,
+            "normalized_center": {
+                "x": 0.4822145081877299,
+                "y": 0.6410427442677233
+            },
+            "orientation": null,
+            "polarity": null,
+            "size_shape": {
+                "width": 0.1757907080896122,
+                "height": 0.3261521206294917
+            },
+            "spacing": null,
+            "reference_observations": 4,
+            "average_confidence": 0.8464312106370926,
+            "reference_id": "C001"
+        }
+    ]
+}
