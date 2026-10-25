@@ -1,5 +1,5 @@
 
-# PCBVision — AI-Powered PCB Inspection System
+# PCBVision: An Embedded Explainable AI-Based Automated Optical Inspection System for PCB
 
 **An end-to-end hardware and software platform for automated Printed Circuit Board (PCB) inspection using computer vision, explainable AI, and real-time hardware feedback.**
 
