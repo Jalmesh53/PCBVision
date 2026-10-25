@@ -12,7 +12,7 @@ class PCBDetector:
 
     def __init__(
         self,
-        confidence=0.25,
+        confidence=0.05,
         image_size=640
     ):
         self.model = YOLO(

@@ -132,6 +132,24 @@ class ComponentOCR:
             print(f"Unable to read OCR image: {image_path}")
             return ""
 
+        # Limit OCR input size before the existing 3x upscale.
+        # This prevents very large component crops from making
+        # Tesseract excessively slow on the Raspberry Pi.
+        max_dimension = 1000
+
+        height, width = image.shape[:2]
+
+        if max(height, width) > max_dimension:
+            scale = max_dimension / max(height, width)
+
+            image = cv2.resize(
+                image,
+                None,
+                fx=scale,
+                fy=scale,
+                interpolation=cv2.INTER_AREA
+            )
+
         try:
             variants = self._preprocess_variants(image)
 

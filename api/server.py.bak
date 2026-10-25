@@ -1,0 +1,24 @@
+from fastapi import FastAPI
+
+app = FastAPI(
+    title="PCBVISION API",
+    description="Raspberry Pi backend API for PCBVISION",
+    version="1.0.0"
+)
+
+
+@app.get("/")
+def root():
+    return {
+        "name": "PCBVISION",
+        "status": "running",
+        "version": "1.0.0"
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy",
+        "service": "PCBVISION API"
+    }

@@ -397,16 +397,16 @@ class XMCCV:
                         False,
 
                     "orientation":
-                        True,
+                        None,
 
                     "polarity":
-                        True,
+                        None,
 
                     "size_shape":
-                        True,
+                        None,
 
                     "spacing":
-                        True,
+                        None,
 
                     "component_pass":
                         False,

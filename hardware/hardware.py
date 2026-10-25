@@ -34,7 +34,7 @@ class HardwareController:
         self.ready()
 
     # -------------------------
-    # LCD helper
+    # LCD HELPER
     # -------------------------
     def lcd_display(self, line1="", line2=""):
 
@@ -50,7 +50,7 @@ class HardwareController:
         self.lcd.write_string(line2[:16])
 
     # -------------------------
-    # LEDs / buzzer
+    # LEDs / BUZZER
     # -------------------------
     def all_off(self):
 
@@ -90,6 +90,37 @@ class HardwareController:
             "PCBVISION",
             "Image Captured"
         )
+
+    # -------------------------
+    # TEMPLATE CAPTURE
+    # -------------------------
+    def template_capture_progress(
+        self,
+        template_name,
+        current_image,
+        total_images,
+    ):
+
+        self.all_off()
+
+        self.lcd_display(
+            "TEMPLATE CAPTURE",
+            f"Image {current_image}/{total_images}"
+        )
+
+    def template_building(self):
+
+        self.all_off()
+
+        self.lcd_display(
+            "BUILDING TEMPLATE",
+            "Please Wait..."
+        )
+
+    def template_saved(self, template_name):
+
+        # Return to the default screen after template creation.
+        self.ready()
 
     # -------------------------
     # UPLOAD
@@ -195,8 +226,7 @@ class HardwareController:
 
         self.red_led.on()
 
-        # Buzzer remains directly controlled
-        # from GPIO22 for now.
+        # Keep the existing buzzer behavior.
         try:
             self.buzzer.on()
         except Exception:
@@ -252,6 +282,22 @@ if __name__ == "__main__":
 
     print("IMAGE CAPTURED")
     hardware.image_captured()
+    time.sleep(2)
+
+    print("TEMPLATE CAPTURE PROGRESS")
+    hardware.template_capture_progress(
+        "MAIN_PCB",
+        1,
+        4
+    )
+    time.sleep(2)
+
+    print("BUILDING TEMPLATE")
+    hardware.template_building()
+    time.sleep(2)
+
+    print("TEMPLATE SAVED")
+    hardware.template_saved("MAIN_PCB")
     time.sleep(2)
 
     print("VALIDATING MODEL")

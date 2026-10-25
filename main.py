@@ -5,6 +5,19 @@ import importlib.util
 from pathlib import Path
 
 
+# YOLO classes that represent known PCB defects. These names must match
+# the classes in models/best.pt. A detection flags the board for FAIL; it
+# is not a claim that the model detects every possible defect type.
+PCB_DEFECT_CLASSES = {
+    "missing_pad",
+    "mouse_bite",
+    "open_circuit",
+    "short",
+    "spur",
+    "spurious_copper",
+}
+
+
 # ============================================================
 # PROJECT PATH
 # ============================================================
@@ -221,204 +234,163 @@ class PCBVision:
 
     def run_xmccv(
         self,
-        detections
+        detections,
+        use_template=False
     ):
 
         print("\n[3/6] Running X-MCCV...")
 
-
-        # ====================================================
-        # CHECK ACTIVE TEMPLATE
-        # ====================================================
-
+        # Template verification is opt-in. The normal inspection path
+        # calls run_xmccv(detections), so it remains detection-only even
+        # if a template happens to be marked active.
         active_template = (
-            self.template_manager
-            .get_active_template()
+            self.template_manager.get_active_template()
+            if use_template
+            else None
         )
-
-
-        # ====================================================
-        # TEMPLATE MODE
-        # ====================================================
 
         if active_template:
-
-            print(
-                f"Active template: "
-                f"{active_template}"
-            )
+            # Keep the existing template-verification path unchanged.
+            print(f"Active template: {active_template}")
 
             template_data = (
-                self.template_manager
-                .load_template(
-                    active_template
-                )
+                self.template_manager.load_template(active_template)
             )
 
-            expected_components = (
-                template_data.get(
-                    "components",
-                    []
-                )
+            expected_components = template_data.get("components", [])
+
+            print(f"Expected components: {len(expected_components)}")
+
+            xmccv_results = self.xmccv.verify(
+                None,
+                detections,
+                expected_components
             )
-
-            print(
-                f"Expected components: "
-                f"{len(expected_components)}"
-            )
-
-
-        # ====================================================
-        # TEMPORARY DEVELOPMENT MODE
-        # ====================================================
 
         else:
+            # Detection-only mode must NOT pass detections through the
+            # template verifier. There are no reference criteria here.
+            print("General inspection: detection and measurement mode.")
 
-            print(
-                "No active template found."
-            )
-
-            print(
-                "Using temporary detection "
-                "self-reference mode."
-            )
-
-            expected_components = []
+            xmccv_results = []
+            class_counts = {}
 
             for detection in detections:
+                class_name = detection.get("class_name", "Unknown")
+                class_counts[class_name] = class_counts.get(class_name, 0) + 1
 
-                expected_components.append({
+            for detection in detections:
+                class_name = detection.get("class_name", "Unknown")
+                bbox = detection.get("bbox") or {}
+                center = detection.get("normalized_center") or {}
+                size = detection.get("normalized_size") or {}
 
-                    "class_id":
-                        detection.get(
-                            "class_id"
+                width = size.get("width")
+                height = size.get("height")
+
+                bbox_width = None
+                bbox_height = None
+                if all(key in bbox for key in ("x1", "x2", "y1", "y2")):
+                    bbox_width = bbox["x2"] - bbox["x1"]
+                    bbox_height = bbox["y2"] - bbox["y1"]
+
+                # Nearest detected component, measured in normalized
+                # image coordinates. This is not a physical distance.
+                spacing = None
+                nearest_distance = None
+                nearest_component = None
+
+                cx = center.get("x")
+                cy = center.get("y")
+
+                if cx is not None and cy is not None:
+                    for other in detections:
+                        if other is detection:
+                            continue
+
+                        other_center = other.get("normalized_center") or {}
+                        ox = other_center.get("x")
+                        oy = other_center.get("y")
+
+                        if ox is None or oy is None:
+                            continue
+
+                        distance = ((cx - ox) ** 2 + (cy - oy) ** 2) ** 0.5
+
+                        if nearest_distance is None or distance < nearest_distance:
+                            nearest_distance = distance
+                            nearest_component = other.get("class_name", "Unknown")
+
+                    if nearest_distance is not None:
+                        spacing = {
+                            "nearest_component": nearest_component,
+                            "normalized_center_distance": round(nearest_distance, 4),
+                            "unit": "normalized_image_coordinates"
+                        }
+
+                xmccv_results.append({
+                    "class_name": class_name,
+                    "class_id": detection.get("class_id"),
+                    "presence": True,
+                    "count": class_counts[class_name],
+                    "position": {
+                        "x": cx,
+                        "y": cy
+                    },
+                    "identity": class_name,
+                    "confidence": detection.get("confidence"),
+                    "orientation": None,
+                    "polarity": None,
+                    "size_shape": {
+                        "width_normalized": width,
+                        "height_normalized": height,
+                        "aspect_ratio": (
+                            round(width / height, 4)
+                            if isinstance(width, (int, float))
+                            and isinstance(height, (int, float))
+                            and height > 0
+                            else None
                         ),
-
-                    "class_name":
-                        detection.get(
-                            "class_name"
-                        ),
-
-                    "count":
-                        1,
-
-                    "center":
-                        detection.get(
-                            "normalized_center"
-                        ),
-
-                    "orientation":
-                        None,
-
-                    "polarity":
-                        None,
-
-                    "size_shape":
-                        detection.get(
-                            "normalized_size"
-                        ),
-
-                    "spacing":
-                        None
+                        "bbox_pixels": {
+                            "width": bbox_width,
+                            "height": bbox_height
+                        }
+                    },
+                    "normalized_size": size,
+                    "spacing": spacing,
+                    "component_pass": None,
+                    "verification_mode": "detection_only",
+                    "unexpected": False,
+                    "reason": None
                 })
 
-
-        # ====================================================
-        # RUN X-MCCV
-        # ====================================================
-
-        xmccv_results = self.xmccv.verify(
-            None,
-            detections,
-            expected_components
-        )
-
-
-        # ====================================================
-        # PRINT X-MCCV RESULTS
-        # ====================================================
-
-        print(
-            "\n----------------------------------------"
-        )
-
-        print(
-            "          X-MCCV RESULTS"
-        )
-
-        print(
-            "----------------------------------------"
-        )
+        # Print X-MCCV results.
+        print("\n----------------------------------------")
+        print("          X-MCCV RESULTS")
+        print("----------------------------------------")
 
         for result in xmccv_results:
+            print(f"\nComponent: {result.get('class_name')}")
+            print(f"Presence: {result.get('presence')}")
+            print(f"Count: {result.get('count')}")
+            print(f"Position: {result.get('position')}")
+            print(f"Identity: {result.get('identity')}")
+            print(f"Orientation: {result.get('orientation')}")
+            print(f"Polarity: {result.get('polarity')}")
+            print(f"Size/Shape: {result.get('size_shape')}")
+            print(f"Spacing: {result.get('spacing')}")
+            component_pass = result.get("component_pass")
 
-            print(
-                f"\nComponent: "
-                f"{result.get('class_name')}"
-            )
+            if component_pass is True:
+                component_status = "PASS"
+            elif component_pass is False:
+                component_status = "FAIL"
+            else:
+                component_status = result.get("component_status") or "UNVERIFIED"
 
-            reference_id = (
-                result.get(
-                    "reference_id"
-                )
-            )
-
-            if reference_id:
-
-                print(
-                    f"Reference ID: "
-                    f"{reference_id}"
-                )
-
-            print(
-                f"Presence: "
-                f"{result.get('presence')}"
-            )
-
-            print(
-                f"Count: "
-                f"{result.get('count')}"
-            )
-
-            print(
-                f"Position: "
-                f"{result.get('position')}"
-            )
-
-            print(
-                f"Identity: "
-                f"{result.get('identity')}"
-            )
-
-            print(
-                f"Orientation: "
-                f"{result.get('orientation')}"
-            )
-
-            print(
-                f"Polarity: "
-                f"{result.get('polarity')}"
-            )
-
-            print(
-                f"Size/Shape: "
-                f"{result.get('size_shape')}"
-            )
-
-            print(
-                f"Spacing: "
-                f"{result.get('spacing')}"
-            )
-
-            print(
-                f"Component PASS: "
-                f"{result.get('component_pass')}"
-            )
-
-            print(
-                f"Reason: "
-                f"{result.get('reason', 'N/A')}"
-            )
+            print(f"Component Status: {component_status}")
+            print(f"Component PASS: {result.get('component_pass')}")
+            print(f"Reason: {result.get('reason', 'N/A')}")
 
         return xmccv_results
 
@@ -431,8 +403,13 @@ class PCBVision:
         self,
         image_path,
         inspection_id=None,
-        use_hardware=True
+        use_hardware=True,
+        inspection_start=None,
+        use_template=False
     ):
+
+        if inspection_start is None:
+            inspection_start = time.perf_counter()
 
         image_path = Path(
             image_path
@@ -528,7 +505,13 @@ class PCBVision:
                         "error",
                     "error":
                         str(error)
-                }
+                },
+                "inspection_time":
+                    round(
+                        time.perf_counter()
+                        - inspection_start,
+                        2
+                    )
             }
 
 
@@ -573,7 +556,8 @@ class PCBVision:
 
             xmccv_results = (
                 self.run_xmccv(
-                    detections
+                    detections,
+                    use_template=use_template
                 )
             )
 
@@ -620,7 +604,13 @@ class PCBVision:
                         "error",
                     "error":
                         str(error)
-                }
+                },
+                "inspection_time":
+                    round(
+                        time.perf_counter()
+                        - inspection_start,
+                        2
+                    )
             }
 
 
@@ -643,6 +633,57 @@ class PCBVision:
                     xmccv_results
                 )
             )
+
+            # Inspect the existing YOLO detections for known PCB defect classes.
+            # Keep component/X-MCCV processing unchanged; a recognized defect
+            # detection overrides an otherwise UNVERIFIED/PASS decision to FAIL.
+            detected_defects = [
+                {
+                    "class_name": detection.get("class_name"),
+                    "confidence": detection.get("confidence"),
+                    "bbox": detection.get("bbox"),
+                }
+                for detection in detections
+                if detection.get("class_name") in PCB_DEFECT_CLASSES
+            ]
+
+            if detected_defects:
+                defect_summary = ", ".join(
+                    f"{item['class_name']} "
+                    f"({float(item['confidence']):.2f})"
+                    if isinstance(item.get("confidence"), (int, float))
+                    else str(item["class_name"])
+                    for item in detected_defects
+                )
+                decision["overall_status"] = "FAIL"
+                decision["reason"] = (
+                    "Potential PCB defect detected by YOLO: "
+                    f"{defect_summary}"
+                )
+
+            decision["detected_defects"] = detected_defects
+
+            print("\n----------------------------------------")
+            print("          X-MCCV RESULTS")
+            print("----------------------------------------")
+
+            for result in xmccv_results:
+                print(f"\nComponent: {result.get('class_name')}")
+                print(f"Presence: {result.get('presence')}")
+                print(f"Count: {result.get('count')}")
+                print(f"Position: {result.get('position')}")
+                print(f"Identity: {result.get('identity')}")
+                print(f"Orientation: {result.get('orientation')}")
+                print(f"Polarity: {result.get('polarity')}")
+                print(f"Size/Shape: {result.get('size_shape')}")
+                print(f"Spacing: {result.get('spacing')}")
+                print(f"Component Status: {result.get('component_status', 'UNVERIFIED')}")
+                print(f"Component PASS: {result.get('component_pass')}")
+                print(f"Reason: {result.get('reason', 'N/A')}")
+
+    
+
+            # Preserve the decision engine result for both general and template inspections.
 
         except Exception as error:
 
@@ -689,7 +730,13 @@ class PCBVision:
                         "error",
                     "error":
                         str(error)
-                }
+                },
+                "inspection_time":
+                    round(
+                        time.perf_counter()
+                        - inspection_start,
+                        2
+                    )
             }
 
 
@@ -861,6 +908,9 @@ class PCBVision:
             "detections":
                 detections,
 
+            "detected_defects":
+                decision.get("detected_defects", []),
+
             "xmccv":
                 xmccv_results,
 
@@ -952,25 +1002,37 @@ class PCBVision:
 
             if result["status"] == "PASS":
 
-                print(
-                    "\nPASS -> Green LED "
-                    "for 3 seconds"
-                )
-
+                print("\nPASS -> Green LED for 3 seconds")
                 self.hardware.pass_signal()
+                time.sleep(3)
+
+            elif result["status"] == "FAIL":
+
+                print("\nFAIL -> Red LED + Buzzer for 3 seconds")
+                self.hardware.fail_signal()
+                time.sleep(3)
 
             else:
 
                 print(
-                    "\nFAIL -> Red LED + "
-                    "Buzzer for 3 seconds"
+                    "\nUNVERIFIED -> No PASS/FAIL hardware signal"
                 )
 
-                self.hardware.fail_signal()
-
-            time.sleep(3)
-
             self.hardware.reset()
+
+
+        inspection_time = round(
+            time.perf_counter()
+            - inspection_start,
+            2
+        )
+
+        result["inspection_time"] = inspection_time
+
+        print(
+            f"\nTotal inspection time: "
+            f"{inspection_time:.2f}s"
+        )
 
 
         print(
@@ -993,6 +1055,8 @@ class PCBVision:
     # ==================================================
 
     def inspect(self):
+
+        inspection_start = time.perf_counter()
 
         print(
             "\n[CAMERA MODE]"
@@ -1021,7 +1085,13 @@ class PCBVision:
                 "inspection_id": None,
                 "input_type": "camera",
                 "reason":
-                    "Camera capture failed"
+                    "Camera capture failed",
+                "inspection_time":
+                    round(
+                        time.perf_counter()
+                        - inspection_start,
+                        2
+                    )
             }
 
         print(
@@ -1034,7 +1104,8 @@ class PCBVision:
         result = self.inspect_image(
             image_path=image_path,
             inspection_id=uuid.uuid4().hex[:12],
-            use_hardware=True
+            use_hardware=True,
+            inspection_start=inspection_start
         )
 
         result["input_type"] = "camera"
@@ -1050,6 +1121,8 @@ class PCBVision:
         self,
         image_path
     ):
+
+        inspection_start = time.perf_counter()
 
         print(
             "\n[UPLOADED IMAGE MODE]"
@@ -1081,7 +1154,13 @@ class PCBVision:
                 "inspection_id": None,
                 "input_type": "upload",
                 "reason":
-                    "Image not found"
+                    "Image not found",
+                "inspection_time":
+                    round(
+                        time.perf_counter()
+                        - inspection_start,
+                        2
+                    )
             }
 
         self.hardware.image_loaded()
@@ -1089,7 +1168,8 @@ class PCBVision:
         result = self.inspect_image(
             image_path=image_path,
             inspection_id=uuid.uuid4().hex[:12],
-            use_hardware=False
+            use_hardware=True,
+            inspection_start=inspection_start
         )
 
         result["input_type"] = "upload"
@@ -1151,6 +1231,11 @@ if __name__ == "__main__":
         print(
             f"Input type: "
             f"{result.get('input_type')}"
+        )
+
+        print(
+            f"Inspection Time: "
+            f"{result.get('inspection_time', 'N/A')}s"
         )
 
         print(
