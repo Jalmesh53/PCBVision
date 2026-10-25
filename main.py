@@ -235,23 +235,36 @@ class PCBVision:
     def run_xmccv(
         self,
         detections,
-        use_template=False
+        use_template=False,
+        template_name=None
     ):
 
         print("\n[3/6] Running X-MCCV...")
 
-        # Template verification is opt-in. The normal inspection path
-        # calls run_xmccv(detections), so it remains detection-only even
-        # if a template happens to be marked active.
-        active_template = (
-            self.template_manager.get_active_template()
-            if use_template
-            else None
-        )
+        # Template verification is opt-in. Prefer the template explicitly
+        # selected by the user; use the active template only for legacy
+        # callers that enable template mode without supplying a name.
+        active_template = None
+        if use_template:
+            active_template = (
+                template_name
+                if template_name
+                else self.template_manager.get_active_template()
+            )
+
+            if not active_template:
+                raise ValueError(
+                    "Template inspection was requested, but no template was selected."
+                )
+
+            available_templates = self.template_manager.list_templates()
+            if active_template not in available_templates:
+                raise ValueError(
+                    f"Template not found: {active_template}"
+                )
 
         if active_template:
-            # Keep the existing template-verification path unchanged.
-            print(f"Active template: {active_template}")
+            print(f"Selected template: {active_template}")
 
             template_data = (
                 self.template_manager.load_template(active_template)
@@ -405,7 +418,8 @@ class PCBVision:
         inspection_id=None,
         use_hardware=True,
         inspection_start=None,
-        use_template=False
+        use_template=False,
+        template_name=None
     ):
 
         if inspection_start is None:
@@ -557,7 +571,8 @@ class PCBVision:
             xmccv_results = (
                 self.run_xmccv(
                     detections,
-                    use_template=use_template
+                    use_template=use_template,
+                    template_name=template_name
                 )
             )
 
@@ -1054,7 +1069,15 @@ class PCBVision:
     # CAMERA INSPECTION
     # ==================================================
 
-    def inspect(self):
+    def inspect(self, template_name=None):
+
+        if template_name is not None:
+            template_name = str(template_name).strip()
+            if not template_name:
+                raise ValueError("Template name cannot be empty.")
+
+            if template_name not in self.template_manager.list_templates():
+                raise ValueError(f"Template not found: {template_name}")
 
         inspection_start = time.perf_counter()
 
@@ -1105,10 +1128,14 @@ class PCBVision:
             image_path=image_path,
             inspection_id=uuid.uuid4().hex[:12],
             use_hardware=True,
-            inspection_start=inspection_start
+            inspection_start=inspection_start,
+            use_template=template_name is not None,
+            template_name=template_name
         )
 
         result["input_type"] = "camera"
+        if template_name is not None:
+            result["template_name"] = template_name
 
         return result
 
@@ -1119,8 +1146,17 @@ class PCBVision:
 
     def inspect_uploaded_image(
         self,
-        image_path
+        image_path,
+        template_name=None
     ):
+
+        if template_name is not None:
+            template_name = str(template_name).strip()
+            if not template_name:
+                raise ValueError("Template name cannot be empty.")
+
+            if template_name not in self.template_manager.list_templates():
+                raise ValueError(f"Template not found: {template_name}")
 
         inspection_start = time.perf_counter()
 
@@ -1169,10 +1205,14 @@ class PCBVision:
             image_path=image_path,
             inspection_id=uuid.uuid4().hex[:12],
             use_hardware=True,
-            inspection_start=inspection_start
+            inspection_start=inspection_start,
+            use_template=template_name is not None,
+            template_name=template_name
         )
 
         result["input_type"] = "upload"
+        if template_name is not None:
+            result["template_name"] = template_name
 
         return result
 

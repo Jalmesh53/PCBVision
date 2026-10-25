@@ -234,11 +234,18 @@ async def capture_camera():
 # FULL PCB INSPECTION - CAMERA
 # ============================================================
 
+class InspectionRequest(BaseModel):
+    template_id: str | None = None
+
+
 @app.post("/inspection/run")
-async def run_inspection():
+async def run_inspection(request: InspectionRequest | None = None):
     try:
+        template_name = request.template_id if request else None
+
         result = await run_in_threadpool(
-            inspection_engine.inspect
+            inspection_engine.inspect,
+            template_name,
         )
 
         if not isinstance(result, dict):
@@ -265,6 +272,7 @@ async def run_inspection():
 @app.post("/inspection/upload")
 async def inspect_uploaded_pcb(
     image: UploadFile = File(...),
+    template_id: str | None = Form(None),
 ):
     suffix = Path(image.filename or "").suffix.lower()
 
@@ -295,6 +303,7 @@ async def inspect_uploaded_pcb(
         result = await run_in_threadpool(
             inspection_engine.inspect_uploaded_image,
             image_path,
+            template_id,
         )
 
         if not isinstance(result, dict):

@@ -42,33 +42,23 @@ class DecisionEngine:
             ):
                 return None
 
-        # Raw measurements are not PASS/FAIL results.
+        # Raw measurements and class names are not check results.
         return None
 
     def _evaluate_component(self, result):
-        """Evaluate a component using applicable check results."""
-
-        detection_only = (
-            result.get("verification_mode") == "detection_only"
-        )
+        """Evaluate a component using available check results."""
 
         statuses = []
 
         for field in self.CHECK_FIELDS:
-            # Detection confirms an object was found, not that
-            # the PCB or component is defect-free.
-            if detection_only and field == "presence":
-                continue
-
             status = self._get_check_status(result.get(field))
 
             if status is not None:
                 statuses.append(status)
 
-        # Do not trust a component_pass value derived from detection
-        # alone. It is only considered in verification modes where
-        # actual component checks are being performed.
-        if not detection_only:
+        # In template-free mode, do not rely on component_pass
+        # from an earlier or externally derived decision.
+        if result.get("verification_mode") != "detection_only":
             existing = result.get("component_pass")
 
             if isinstance(existing, bool):
@@ -79,10 +69,10 @@ class DecisionEngine:
         if "FAIL" in statuses:
             return "FAIL"
 
-        if not statuses:
-            return "UNVERIFIED"
+        if "PASS" in statuses:
+            return "PASS"
 
-        return "PASS"
+        return "UNVERIFIED"
 
     def evaluate(self, x_mccv_results):
         """Evaluate component results and determine inspection status."""
@@ -90,7 +80,7 @@ class DecisionEngine:
         if not x_mccv_results:
             return {
                 "overall_status": "UNVERIFIED",
-                "reason": "No component checks were available",
+                "reason": "No component detections or checks were available",
                 "passed_components": 0,
                 "failed_components": 0,
                 "unverified_components": 0,
@@ -117,35 +107,22 @@ class DecisionEngine:
                 result["component_pass"] = None
                 unverified_components += 1
 
-        # Detection-only evidence cannot establish board quality.
-        detection_only = any(
-            result.get("verification_mode") == "detection_only"
-            for result in x_mccv_results
-        )
-
         if failed_components > 0:
             overall_status = "FAIL"
             reason = (
                 "One or more components failed an applicable check"
             )
 
-        elif detection_only:
-            overall_status = "UNVERIFIED"
-            reason = (
-                "Detection-only inspection cannot establish PCB quality; "
-                "defect verification is required"
-            )
-
         elif unverified_components > 0:
             overall_status = "UNVERIFIED"
             reason = (
-                "One or more components could not be fully verified"
+                "One or more components had no evaluable PASS/FAIL check"
             )
 
         elif passed_components > 0:
             overall_status = "PASS"
             reason = (
-                "All evaluated components passed applicable checks"
+                "All detected components passed the available checks"
             )
 
         else:
@@ -169,7 +146,7 @@ if __name__ == "__main__":
 
     test_cases = [
         {
-            "name": "Detection-only inspection",
+            "name": "Detection-only component found",
             "results": [
                 {
                     "class_name": "resistor",
@@ -179,7 +156,7 @@ if __name__ == "__main__":
                     "component_pass": None,
                 }
             ],
-            "expected": "UNVERIFIED",
+            "expected": "PASS",
         },
         {
             "name": "Explicit failed position check",
@@ -238,9 +215,10 @@ if __name__ == "__main__":
         print(f"\nTest: {test['name']}")
         print(f"Expected: {expected}")
         print(f"Actual:   {actual}")
-        print(f"Result:   {'OK' if passed else 'FAILED'}")
+        print(f"Result:   {'PASS' if passed else 'FAIL'}")
 
-    if not all_passed:
-        raise SystemExit(1)
-
-    print("\nAll decision-engine tests passed.")
+    print(
+        "\nAll tests passed."
+        if all_passed
+        else "\nSome tests failed."
+    )

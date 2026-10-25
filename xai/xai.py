@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO
+from xai.openrouter_explainer import explain_inspection
 
 
 BASE_DIR = Path("/home/pi4/PCBVISION")
@@ -822,12 +823,19 @@ class XAIEngine:
             # ------------------------------------------
 
             if detections:
-
-                return self._generate_heatmap(
+                result = self._generate_heatmap(
                     image_path,
                     detections,
                     inspection_id
                 )
+                if result.get("status") == "success":
+                    llm_result = explain_inspection(detections, x_mccv_results)
+                    print(
+                        "[XAI] OpenRouter result:",
+                        {k: v for k, v in llm_result.items() if k != "explanation"}
+                    )
+                    result.update(llm_result)
+                return result
 
             # ------------------------------------------
             # MISSING COMPONENT XAI
@@ -835,14 +843,19 @@ class XAIEngine:
 
             if x_mccv_results:
 
-                return (
-                    self
-                    ._generate_missing_component_explanation(
-                        image_path,
-                        x_mccv_results,
-                        inspection_id
-                    )
+                result = self._generate_missing_component_explanation(
+                    image_path,
+                    x_mccv_results,
+                    inspection_id
                 )
+                if result.get("status") == "success":
+                    llm_result = explain_inspection(detections, x_mccv_results)
+                    print(
+                        "[XAI] OpenRouter result:",
+                        {k: v for k, v in llm_result.items() if k != "explanation"}
+                    )
+                    result.update(llm_result)
+                return result
 
             raise RuntimeError(
                 "No YOLO detection or X-MCCV "
